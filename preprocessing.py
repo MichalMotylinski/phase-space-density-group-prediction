@@ -148,7 +148,7 @@ def gaia_exoplanets_cross(gaia_filename):
 
 
 @njit
-def to_sets(target, gaia, dist1=40, dist2=80):
+def to_sets_6d(target, gaia, dist1=40, dist2=80):
     """
     Create two sets of neigbours of the target star within given range (by default 40pc and 80pc).
 
@@ -178,6 +178,40 @@ def to_sets(target, gaia, dist1=40, dist2=80):
             set2.append(gaia[j][:])
 
     return set1, set2
+
+
+@njit
+def to_sets_5d(target, gaia, dist1=40, dist2=80):
+    """
+    Create two sets of neigbours of the target star within given range (by default 40pc and 80pc).
+
+    :param target: 6D phase space coordinates of the target star
+    :param gaia: List of 6D coordinates for all stars in Gaia dataset
+    :param dist1: First neighbourhood radius.
+    :param dist2: Second neighbourhood radius.
+
+    :return: Return 2 sets of neighbours according to the supplied dist1 and dist2 params
+    """
+
+    set1 = []
+    set2 = []
+    for j in range(gaia.shape[0]):
+        # Calculate distance with an equivalent of np.linalg.norm function which is not supported by numba.
+        z = np.zeros(shape=target[:3].shape)
+        for i in range(len(target)):
+            z[i] = target[i] - gaia[j][i]
+        dist = np.sqrt(np.sum(z ** 2, 0))
+
+        # Check if value fits into a predefined range and if so add value to an appropriate array.
+        # TO DO: python lists are very inefficient and should be replaced.
+        if dist < dist1:
+            set1.append(gaia[j][:])
+
+        if dist < dist2:
+            set2.append(gaia[j][:])
+
+    return set1, set2
+
 
 
 @njit
@@ -211,7 +245,7 @@ def calc_mah(i, set1, set2, set2_inv):
 
 
 @njit
-def calc_dense(mah_dist_arr):
+def calc_dense_6d(mah_dist_arr):
     """
     Calculate phase space density for each neighbour.
 
@@ -220,6 +254,20 @@ def calc_dense(mah_dist_arr):
     :return: List of phase space densities of all neighbours.
     """
     density = 20 / mah_dist_arr ** 6
+    norm_density = density/np.median(density)
+    return norm_density
+
+
+@njit
+def calc_dense_5d(mah_dist_arr):
+    """
+    Calculate phase space density for each neighbour.
+
+    :param mah_dist_arr: List of mahalanobis distances from target star to all neighbours.
+
+    :return: List of phase space densities of all neighbours.
+    """
+    density = 20 / mah_dist_arr ** 5
     norm_density = density/np.median(density)
     return norm_density
 
@@ -257,7 +305,7 @@ def exoplanet_hosts_densities(i, gaia):
         continue"""
     target = gaia[i]
 
-    set1, set2 = to_sets(target, gaia)
+    set1, set2 = to_sets_6d(target, gaia)
 
     set1 = np.array(set1)
     set2 = np.array(set2)
@@ -274,7 +322,7 @@ def exoplanet_hosts_densities(i, gaia):
         mah_dist_arr[j] = (calc_mah(j, set1, set2, set2_inv))
 
     # Calculate densities for each star within 40pc
-    norm_density = calc_dense(np.array(mah_dist_arr))
+    norm_density = calc_dense_6d(np.array(mah_dist_arr))
 
     # Extract host from the list and remove it from the list for further use
     host = norm_density[host_idx]
