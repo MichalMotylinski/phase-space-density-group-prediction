@@ -18,20 +18,20 @@ def to_sets(target, gaia, dist1=40, dist2=80):
 
     set1 = []
     set2 = []
-    for j in range(gaia.shape[0]):
+    for i in range(gaia.shape[0]):
         # Calculate distance with an equivalent of np.linalg.norm function which is not supported by numba.
         z = np.zeros(shape=target[:3].shape)
-        for i in range(len(target)):
-            z[i] = target[i] - gaia[j][i]
+        for j in range(target[:3].shape[0]):
+            z[j] = target[j] - gaia[i][j]
         dist = np.sqrt(np.sum(z ** 2, 0))
 
         # Check if value fits into a predefined range and if so add value to an appropriate array.
         # TO DO: python lists are very inefficient and should be replaced.
         if dist < dist1:
-            set1.append(gaia[j][:])
+            set1.append(gaia[i][:])
 
         if dist < dist2:
-            set2.append(gaia[j][:])
+            set2.append(gaia[i][:])
 
     return set1, set2
 
@@ -56,7 +56,6 @@ def calc_mah(i, set2, set2_inv):
         # Below is a manual implementation of mahalanobis distance as numba does not support scipy function.
 
         delta = i - set2[j]
-
         m = np.dot(np.dot(delta, set2_inv), delta)
 
         # New value is compared to currently stored values and if it replaces the highest value if new value < highest value in the set.
