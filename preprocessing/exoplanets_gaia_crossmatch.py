@@ -9,36 +9,41 @@ crossmatch_dir = "data/crossmatch"
 
 def gaia_exoplanets_cross(gaia_filename, return_data=False, save_to_file=True):
     """
-    Cross match Gaia dataset with NASA exoplanet dataset and winter results (for comparison only).
-    :returns: Cross matched dataset
+    Cross match Gaia dataset with NASA exoplanet dataset.
+
+    :param gaia_filename: Name of the file to read Gaia information from
+    :param return_data: Return crossmatched gaia data for further use
+    :param save_to_file: Save crossmatched data to a CSV format
+    :return: Cross matched dataset
     """
 
+    # Path to downloaded datasets
     datasets_dir = "data/initial_datasets"
 
+    # Read Exoplanets data
     exoplanets = pd.read_csv(path.join(datasets_dir, "exoplanets.csv"), skiprows=24,
                              usecols=["pl_name", "hostname", "gaia_id", "pl_orbper", "pl_orbsmax", "pl_bmasse"])
+    # Process Exoplanets data
     exoplanets.dropna(subset=["gaia_id"], inplace=True)
     exoplanets["source_id"] = exoplanets["gaia_id"].str.rsplit(" ", n=1, expand=True)[1].astype("int64")
     exoplanets.drop(["gaia_id"], axis=1, inplace=True)
     exoplanets["Host"] = exoplanets["hostname"].str.replace(" ", "")
     exoplanets.drop_duplicates(subset=["Host"], inplace=True)
 
+    # Read Gaia data
     gaia = pd.read_csv(path.join(datasets_dir, gaia_filename))
 
+    # Add Gaia information to Exoplanet hosts
     exoplanets = pd.merge(exoplanets, gaia, on="source_id")
     exoplanets.drop(["pl_name", "hostname"], axis=1, inplace=True)
-    """hosts = load_winter()
-    # Save crossmatch with Winter data
-    hosts = pd.merge(hosts, exoplanets, on="Host")
-    hosts.to_csv("hosts.csv")
-    hosts.drop(hosts.columns[0:8], axis=1, inplace=True)"""
-    print(exoplanets)
-    # Remove exoplanet hosts
+
+    # Remove exoplanet hosts from Gaia
     gaia = gaia[~gaia["source_id"].isin(exoplanets["source_id"])]
     # Further reduction of the data
     gaia = gaia[4.5 < gaia["parallax"] / gaia["parallax_error"]]
 
-    # Concatenate exoplanet hosts back, however at the top of the dataframe.
+    # Concatenate exoplanet hosts back, however at the top of the dataframe. This way for testing purposes we later
+    # iterate only over first 1065 entries that are exoplanet hosts.
     gaia = pd.concat([exoplanets, gaia])
 
     # Calculate distance in pc and drop any stars with negative or null distance
@@ -49,8 +54,10 @@ def gaia_exoplanets_cross(gaia_filename, return_data=False, save_to_file=True):
     gaia["ra"] = (gaia["ra"] * np.pi) / 180.
     gaia["dec"] = (gaia["dec"] * np.pi) / 180.
 
+    # Drop all unnecessary data leaving only 6 coordinates, their errors and distance
     gaia.drop(gaia.columns[:5], axis=1, inplace=True)
 
+    # Save transformed data to a new file
     if save_to_file:
         gaia.to_csv(path.join(crossmatch_dir, f"{gaia_filename.split('.')[0]}_exoplanet_cross_spherical.csv"),
                     index=False)
@@ -61,25 +68,39 @@ def gaia_exoplanets_cross(gaia_filename, return_data=False, save_to_file=True):
 
 
 def transform_to_cart(gaia, table_name, setting="6d", predicted_radial_velocity=None):
+    """
+
+    :param gaia: Gaia dataset
+    :param table_name: Name of the Gaia table used
+    :param setting: Option used to convert either from 5D or 6D spherical to cartesian
+    :param predicted_radial_velocity: Optional - True when using predicted radial velocity coordinate
+    :return: Return Gaia dataset with converted coordinates
+    """
+
+    # First 3 coordinates remain the same for all options
     gaia["x"], gaia["y"], gaia["z"] = sph2cart(gaia["distance_pc"], gaia["ra"], gaia["dec"])
+
     if predicted_radial_velocity:
         # 5D coords with predicted radial velocity [hard]
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(predicted_radial_velocity, gaia["pmra"], gaia["pmdec"],
                                                        gaia["distance_pc"], gaia["ra"], gaia["dec"])
         gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
-        gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_predicted_rv.csv"), index=False)
+        option = "rv"
 
     if setting == "6d":
         # Convert from spherical to cartesian coordinates [easy]
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
                                                        gaia["distance_pc"], gaia["ra"], gaia["dec"])
         gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
-        gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_6d.csv"), index=False)
+        option = "6d"
     else:
         # 5D coords [average]
         gaia[["vx", "vy"]]= gaia[["pmra", "pmdec"]]
         gaia.drop(gaia.columns[:-5], axis=1, inplace=True)
-        gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_5d.csv"), index=False)
+        option = "5d"
+
+    # Save to CSV
+    gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_{option}.csv"), index=False)
 
     return gaia
 

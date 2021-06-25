@@ -4,14 +4,17 @@ from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import Dense, Dropout, Input
 from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import r2_score
+from tensorflow.keras import backend as K
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def random_forest(data, output):
     x_train, x_test, y_train, y_test = train_test_split(data, output, test_size=0.2)
-    regr = RandomForestRegressor(max_depth=30, n_jobs=-1)
+    regr = RandomForestRegressor(max_depth=2, n_jobs=-1)
     regr.fit(x_train, y_train)
 
     print(regr.predict(x_test))
@@ -20,8 +23,13 @@ def random_forest(data, output):
     print(y_test[:20])
     print(regr.predict(x_test)[:20])
 
+    print(('R2 score for Phigh: ', r2_score(y_test, regr.predict(x_test))))
+
 
 class RadialVelocityRegression:
+    def __init__(self):
+        self.weights = None
+
     def get_initializer(self):
         return tf.keras.initializers.GlorotUniform()
 
@@ -35,40 +43,60 @@ class RadialVelocityRegression:
         return setup
 
     def uncertainty_layers(self, inputs):
-        setup = Dense(30, activation="relu", kernel_initializer=self.get_initializer(), input_dim=5)(inputs)
-        setup = Dense(units=30, activation='relu', kernel_initializer=self.get_initializer())(setup)
-        setup = Dense(units=30, activation='relu', kernel_initializer=self.get_initializer())(setup)
-        setup = Dense(units=30, activation='relu', kernel_initializer=self.get_initializer())(setup)
-        setup = Dense(units=1, kernel_initializer=self.get_initializer(), activation="linear")(setup)
+        setup = Dense(30, activation='tanh', kernel_initializer=self.get_initializer(), input_dim=5)(inputs)
+        setup = Dense(units=30, activation='tanh', kernel_initializer=self.get_initializer())(setup)
+        setup = Dense(units=30, activation='tanh', kernel_initializer=self.get_initializer())(setup)
+        setup = Dense(units=30, activation='tanh', kernel_initializer=self.get_initializer())(setup)
+        setup = Dense(units=1, kernel_initializer=self.get_initializer(), activation='relu')(setup)
 
         return setup
 
+    def loss_function(self, y_true, y_pred):
+        weights = Input((1,))
+        print(y_true[0])
+        print(y_true[1])
+        print("B")
+        print(y_pred[0])
+        print("A")
+        print(y_pred[1])
+        error = y_true - y_pred
+        #res = K.sum((((y_true - y_pred[0])**2)/K.sqrt(2*y_pred[1])**2)-(K.log(1/K.sqrt(2*y_pred[1]))))
+        #print(res)
+        #return res
+        return K.mean(K.square(error) + K.sqrt(weights))
+
     def assemble_model(self, input_shape):
         inputs = Input(shape=input_shape)
+        weights = Input((1,))
 
         velocity_branch = self.velocity_layers(inputs)
         uncertainty_branch = self.uncertainty_layers(inputs)
 
         model = Model(inputs=inputs, outputs=[velocity_branch, uncertainty_branch], name="rv_net")
-
+        #model = Model([inputs,Input((1,)), Input((1,))])
+        #model.add_loss(self.loss_function(inputs, [velocity_branch, uncertainty_branch], weights))
+        #self.weights = model.get_weights()
         lr = 1e-3
         epochs = 100
         optimizer = Adam(lr=lr)
 
         model.compile(optimizer=optimizer,
-                      loss='mean_squared_error'
+                      loss=self.loss_function
                       )
 
         return model
 
+
     def train_model(self, x_train, y_train, x_val, y_val, model):
         batch_size = 64
         valid_batch_size = 64
-        epochs = 10
+        epochs = 20
+        weights = np.random.normal(size=x_train.shape)
+        weightsv = np.random.normal(size=x_val.shape)
 
-        history = model.fit(x_train,
+        history = model.fit([x_train, weights],
                             y_train,
-                            validation_data=(x_val, y_val),
+                            validation_data=([x_val, weightsv], y_val),
                             batch_size=batch_size,
                             validation_batch_size=valid_batch_size,
                             epochs=epochs)
@@ -89,28 +117,28 @@ class RadialVelocityRegression:
 def ann(data, output):
     x_train, x_test, y_train, y_test = train_test_split(data, output, test_size=0.2)
     x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2)
-    sc = StandardScaler()
+    """sc = StandardScaler()
     x_train = sc.fit_transform(x_train)
     x_val = sc.fit_transform(x_val)
-    x_test = sc.transform(x_test)
+    x_test = sc.transform(x_test)"""
 
     initializer = tf.keras.initializers.GlorotUniform()
 
     model = Sequential()
-    model.add(Dense(30, activation='tanh', kernel_initializer=initializer, input_dim=5))
-    model.add(Dense(units=30, activation='tanh', kernel_initializer=initializer))
-    model.add(Dense(units=30, activation='tanh', kernel_initializer=initializer))
-    model.add(Dense(units=30, activation='tanh', kernel_initializer=initializer))
-    model.add(Dense(units=1, kernel_initializer=initializer, activation="linear"))
+    model.add(Dense(11, activation='relu', kernel_initializer='normal', input_dim=11))
+    model.add(Dense(units=11, activation='relu', kernel_initializer='normal'))
+    model.add(Dense(units=11, activation='relu', kernel_initializer='normal'))
+
+    model.add(Dense(units=1, kernel_initializer='normal', activation="linear"))
 
     # Compile model
     model.compile(loss='mean_squared_error', optimizer='adam')
 
-    model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=64, epochs=10)
+    model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=64, epochs=100)
 
     y_pred = model.predict(x_test)
 
     print(y_test[:20])
     print(y_pred[:20])
-
+    print(('R2 score for velocity: ', r2_score(y_test, y_pred)))
 
