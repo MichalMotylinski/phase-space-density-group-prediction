@@ -1,4 +1,5 @@
 from numba import njit, prange
+from numba import cuda, float64
 import numpy as np
 import time
 
@@ -47,6 +48,7 @@ def calc_mah(set1_star, set2, set2_inv):
 
     :return: Mahalanobis distance to the 20th closest neighbour of the target.
     """
+
     # Create an array with infinite numbers. for 20 closest stars.
     # The idea here is that as the new values are being calculated the largest values will be replaced in the list.
     mahal_dist = np.full(20, np.inf, dtype="float64")
@@ -65,8 +67,64 @@ def calc_mah(set1_star, set2, set2_inv):
     return np.sqrt(mahal_dist.max())
 
 
+@cuda.jit
+def ar(set1, set2, set2_inv, dists):
+    start = cuda.grid(1)
+    stride = cuda.gridsize(1)
+
+    # Loop over all close neighbours
+    for i in range(start, set1.shape[0], stride):
+        dist = cuda.local.array(shape=(20,), dtype=float64)
+        for g in range(dist.shape[0]):
+            dist[g] = 99999.
+        max_val = 0
+
+        delta = cuda.local.array(shape=(6,), dtype=float64)
+        z = cuda.local.array(shape=(6,), dtype=float64)
+        for j in range(set2.shape[0]):
+            # Subtract arrays
+            for k in range(set2.shape[1]):
+                delta[k] = set1[i][k] - set2[j][k]
+
+            # Compute first dot product
+            for k in range(delta.shape[0]):
+                s = 0
+                for l in range(set2_inv.shape[0]):
+                    a = delta[l] * set2_inv[l][k]
+                    s = s + a
+                z[k] = s
+
+            # Compute second dot product
+            u = 0
+            for l in range(z.shape[0]):
+                a = z[l] * delta[l]
+                u = u + a
+
+            # Fill an array with the first 20 values and then continue comparing current value to the maximum value in
+            # the array. If current value is lower then add it to array in place of the maximum value
+            if j < 20:
+                dist[j] = u
+            elif j == 20:
+                for g in range(dist.shape[0]):
+                    if dist[g] > max_val:
+                        max_val = dist[g]
+
+            if max_val > u:
+                for g in range(dist.shape[0]):
+                    if dist[g] == max_val:
+                        dist[g] = u
+                        max_val = 0
+                        for g in range(dist.shape[0]):
+                            if dist[g] > max_val:
+                                max_val = dist[g]
+                        break
+
+        # Save maximum value (20th nearest neighbour) to the list
+        dists[i] = max_val
+
+
 @njit
-def calc_dense(mah_dist_arr, dims=6):
+def calc_dense(mah_dist_arr, dims=6, nth_star=20):
     """
     Calculate phase space density for each neighbour.
 
@@ -75,7 +133,7 @@ def calc_dense(mah_dist_arr, dims=6):
 
     :return: List of phase space densities of all neighbours.
     """
-    density = 20 / mah_dist_arr ** dims
+    density = nth_star / mah_dist_arr ** dims
     norm_density = density/np.median(density)
     return norm_density
 
@@ -91,11 +149,10 @@ def get_densities(hosts, gaia):
     """
 
     densities = []
-    o = 0
     for i in range(hosts.shape[0]):
-        o = o+1
         target = gaia[i]
-
+        if i > 10:
+            continue
         # Generate sets of star neighbours
         set1, set2 = to_sets(target, gaia)
         set1 = np.array(set1)
@@ -109,12 +166,18 @@ def get_densities(hosts, gaia):
         set2_inv = np.atleast_2d(np.linalg.inv(np.cov(set2.T)))
 
         # Calculate mahalanobis distance for all neighbours from set1
-        mah_dist_arr = np.zeros(set1.shape[0])
+        """mah_dist_arr = np.zeros(set1.shape[0], dtype="float64")
         for j in range(set1.shape[0]):
-            mah_dist_arr[j] = (calc_mah(set1[j], set2, set2_inv))
+            mah_dist_arr[j] = (calc_mah(set1[j], set2, set2_inv))"""
+        start = time.perf_counter()
+        mah_dist_arr = np.zeros(shape=(set1.shape[0],))
+        ar[46, 64](set1, set2, set2_inv, mah_dist_arr)
+        mah_dist_arr = np.sqrt(mah_dist_arr)
+        end = time.perf_counter()
+        print(end-start)
 
         # Calculate densities for each neighbour from set1
-        norm_density = calc_dense(np.array(mah_dist_arr), gaia.shape[1])
+        norm_density = calc_dense(mah_dist_arr, gaia.shape[1])
 
         # Extract host from the list and remove it from the list for further use
         host = norm_density[host_idx]
@@ -122,5 +185,62 @@ def get_densities(hosts, gaia):
 
         # Save both target host density and its neighbours densities to an array
         densities.append([hosts[i], host, norm_density])
+
+    return densities
+
+
+def get_random_densities(hosts, gaia, rand_stars, iters):
+    """
+    Calculate phase space density for a list of stars supplied in first argument
+
+    :param hosts: List of exoplanet host stars
+    :param gaia: List of cartesian coordinates for all gaia stars
+
+    :return: List of phase space densities where first entry is target star and remaining values are its neighbours
+    """
+    rand_stars = rand_stars + 1
+    densities = []
+    for i in range(hosts.shape[0]):
+        target = gaia[i]
+
+        # Generate sets of star neighbours
+        set1, set2 = to_sets(target, gaia)
+        set1 = np.array(set1)
+        set2 = np.array(set2)
+
+        # Get id of the target star and remove it from set2
+        #host_idx = np.where(set1 == target)[0][0]
+        #set1 = np.delete(set1, np.where(set1 == target)[0][0], 0)
+        set2 = np.delete(set2, np.where(set2 == target)[0][0], 0)
+
+        for j in range(iters):
+            # Randomize set1 and put back target star on top of the set
+            set1 = np.delete(set1, np.where(set1 == target)[0][0], 0)
+            set1 = np.random.permutation(set1)
+            set1 = np.vstack((target, set1))
+
+            # Create inverted covariance matrix of set2
+            set2_inv = np.atleast_2d(np.linalg.inv(np.cov(set2.T)))
+
+            # Calculate mahalanobis distance for all neighbours from set1
+
+            if set1.shape[0] <= rand_stars:
+                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
+                ar[32, 64](set1, set2, set2_inv, mah_dist_arr)
+            else:
+                mah_dist_arr = np.zeros(shape=(rand_stars,))
+                ar[32, 64](set1[:rand_stars], set2, set2_inv, mah_dist_arr)
+
+            mah_dist_arr = np.sqrt(mah_dist_arr)
+
+            # Calculate densities for each neighbour from set1
+            norm_density = calc_dense(mah_dist_arr, gaia.shape[1])
+
+            # Extract host from the list and remove it from the list for further use
+            host = norm_density[0]
+            norm_density = np.delete(norm_density, 0, 0)
+
+            # Save both target host density and its neighbours densities to an array
+            densities.append([hosts[i], host, norm_density])
 
     return densities
