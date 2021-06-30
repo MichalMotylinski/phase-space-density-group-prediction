@@ -7,7 +7,7 @@ from .read_winter import load_winter
 crossmatch_dir = "data/crossmatch"
 
 
-def gaia_exoplanets_cross(gaia_filename, return_data=False, save_to_file=True):
+def gaia_exoplanets_cross(gaia_filename, save_gaia_id=False, return_data=False, save_spherical=True):
     """
     Cross match Gaia dataset with NASA exoplanet dataset.
 
@@ -54,11 +54,14 @@ def gaia_exoplanets_cross(gaia_filename, return_data=False, save_to_file=True):
     gaia["ra"] = (gaia["ra"] * np.pi) / 180.
     gaia["dec"] = (gaia["dec"] * np.pi) / 180.
 
+    if save_gaia_id:
+        gaia[["source_id", "Host"]].to_csv(path.join(crossmatch_dir, f"{gaia_filename.split('.')[0]}_star_labels.csv"), index=False)
+
     # Drop all unnecessary data leaving only 6 coordinates, their errors and distance
     gaia.drop(gaia.columns[:5], axis=1, inplace=True)
 
     # Save transformed data to a new file
-    if save_to_file:
+    if save_spherical:
         gaia.to_csv(path.join(crossmatch_dir, f"{gaia_filename.split('.')[0]}_exoplanet_cross_spherical.csv"),
                     index=False)
         exoplanets.to_csv(path.join(crossmatch_dir, "exoplanet_hosts.csv"), index=False)
@@ -85,22 +88,32 @@ def transform_to_cart(gaia, table_name, setting="6d", predicted_radial_velocity=
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(predicted_radial_velocity, gaia["pmra"], gaia["pmdec"],
                                                        gaia["distance_pc"], gaia["ra"], gaia["dec"])
         gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
-        option = "rv"
+        setting = "predicted_rv"
 
     if setting == "6d":
         # Convert from spherical to cartesian coordinates [easy]
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
                                                        gaia["distance_pc"], gaia["ra"], gaia["dec"])
         gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
-        option = "6d"
-    else:
+    elif setting == "5d_drop_vz":
         # 5D coords [average]
         gaia[["vx", "vy"]]= gaia[["pmra", "pmdec"]]
         gaia.drop(gaia.columns[:-5], axis=1, inplace=True)
-        option = "5d"
+    elif setting == "5d_drop_vy":
+        # 5D coords [average]
+        gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
+                                                       gaia["distance_pc"], gaia["ra"], gaia["dec"])
+        gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
+        gaia.drop(["vy"], axis=1, inplace=True)
+    elif setting == "5d_drop_vx":
+        # 5D coords [average]
+        gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
+                                                       gaia["distance_pc"], gaia["ra"], gaia["dec"])
+        gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
+        gaia.drop(["vx"], axis=1, inplace=True)
 
     # Save to CSV
-    gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_{option}.csv"), index=False)
+    gaia.to_csv(path.join(crossmatch_dir, f"{table_name}_exoplanet_cross_cartesian_{setting}.csv"), index=False)
 
     return gaia
 
