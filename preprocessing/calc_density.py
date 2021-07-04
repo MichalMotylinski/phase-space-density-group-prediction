@@ -25,6 +25,7 @@ def to_sets(target, gaia, dist1=40, dist2=80):
         z = np.zeros(shape=target[:3].shape)
         for j in range(target[:3].shape[0]):
             z[j] = target[j] - gaia[i][j]
+
         dist = np.sqrt(np.sum(z ** 2, 0))
 
         # Check if value fits into a predefined range and if so add value to an appropriate array.
@@ -36,6 +37,67 @@ def to_sets(target, gaia, dist1=40, dist2=80):
             set2.append(gaia[i][:])
 
     return set1, set2
+
+
+"""@cuda.jit
+def to_sets_gpu(target, gaia, set1, set2):
+    start = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    dist1 = 40
+    dist2 = 80
+    #z = np.zeros(shape=target[:3].shape)
+    #z = cuda.local.array(shape=(3,), dtype=float64)
+    set1_idx = 0
+    set2_idx = 0
+    for i in range(start, gaia.shape[0], stride):
+        s = 0
+        for j in range(3):
+            z = (target[j] - gaia[i][j]) ** 2
+            s = s + z
+        dist = math.sqrt(s)
+
+        set1[set1_idx] = s
+        set1_idx = set1_idx + 1
+        if set1_idx == 3:
+            break
+
+        if dist < dist1:
+            for k in range(set1.shape[1]):
+                set1[set1_idx][k] = gaia[i][k]
+            set1_idx = set1_idx + 1
+            #set1.append(gaia[i][:])
+
+        if dist < dist2:
+            for k in range(set2.shape[1]):
+                set2[set2_idx][k] = gaia[i][k]
+            set2_idx = set2_idx + 1
+        #set2.append(gaia[i][:])
+
+
+    # Loop over all close neighbours
+    for i in range(start, set1.shape[0], stride):"""
+
+
+@cuda.jit
+def to_sets_gpu(target, gaia, set1, set2):
+    start = cuda.grid(1)
+    stride = cuda.gridsize(1)
+    dist1 = 40
+    dist2 = 80
+
+    for i in range(start, gaia.shape[0], stride):
+        s = 0
+        for j in range(3):
+            z = (target[j] - gaia[i][j]) ** 2
+            s = s + z
+        dist = math.sqrt(s)
+
+        if dist < dist1:
+            for k in range(set1.shape[1]):
+                set1[i][k] = gaia[i][k]
+        if dist < dist2:
+            for k in range(set2.shape[1]):
+                set2[i][k] = gaia[i][k]
 
 
 @njit(parallel=True)
@@ -207,12 +269,19 @@ def get_densities(n_stars, labels,  gaia):
 
     densities = []
     for i in range(n_stars):
-        target = gaia[i]
-
+        """target = gaia[i]
         # Generate sets of star neighbours
         set1, set2 = to_sets(target, gaia)
         set1 = np.array(set1)
         set2 = np.array(set2)
+        #target = gaia[i]"""
+
+        target = np.ascontiguousarray(gaia[i])
+        set1 = np.zeros(shape=gaia.shape)
+        set2 = np.zeros(shape=gaia.shape)
+        to_sets_gpu[160, 256](target, gaia, set1, set2)
+        set1 = set1[~np.all(set1 == 0, axis=1)]
+        set2 = set2[~np.all(set2 == 0, axis=1)]
 
         # Get id of the target star and remove it from set2
         host_idx = np.where(set1 == target)[0][0]
