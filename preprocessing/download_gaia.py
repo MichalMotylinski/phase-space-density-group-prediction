@@ -24,7 +24,7 @@ class GaiaDataset:
         """
 
         self.query = f"""
-        select source_id, ra, ra_error, dec, dec_error, parallax, parallax_error, pmra, pmra_error, pmdec, pmdec_error, 
+        select source_id, ra, ra_error, dec, dec_error, parallax, parallax_error, pmra, pmra_error, pmdec, pmdec_error,
         dr2_radial_velocity, dr2_radial_velocity_error from {self.table} where source_id is not null and ra is 
         not null and ra_error is not null and dec is not null and dec_error is not null and parallax is not null and 
         parallax_error is not null and pmra is not null and pmra_error is not null and pmdec is not null and 
@@ -44,4 +44,5 @@ class GaiaDataset:
         if self.filename[-4:] != ".csv":
             self.filename = self.filename + ".csv"
 
-        Gaia.launch_job_async(self.query).get_results().to_pandas().to_csv(self.filename, index=False)
+        Gaia.launch_job_async(self.query).get_results().to_pandas().to_csv("data/initial_datasets/" + self.filename,
+                                                                           index=False)

@@ -6,11 +6,11 @@ import math
 
 
 @njit(parallel=False)
-def to_sets(target, gaia, dist1=40, dist2=80):
+def to_sets_cpu(target, gaia, dist1=40, dist2=80):
     """
     Create two sets of neigbours of the target star within given range (by default 40pc and 80pc).
 
-    :param target: phase space coordinates of the target star
+    :param target: Phase space coordinates of the target star
     :param gaia: List of phase space coordinates for all stars in Gaia dataset
     :param dist1: First neighbourhood radius.
     :param dist2: Second neighbourhood radius.
@@ -21,7 +21,7 @@ def to_sets(target, gaia, dist1=40, dist2=80):
     set1 = []
     set2 = []
     for i in range(gaia.shape[0]):
-        # Calculate distance with an equivalent of np.linalg.norm function which is not supported by numba.
+        # Calculate distance from target star to its neighbour
         z = np.zeros(shape=target[:3].shape)
         for j in range(target[:3].shape[0]):
             z[j] = target[j] - gaia[i][j]
@@ -29,7 +29,6 @@ def to_sets(target, gaia, dist1=40, dist2=80):
         dist = np.sqrt(np.sum(z ** 2, 0))
 
         # Check if value fits into a predefined range and if so add value to an appropriate array.
-        # TO DO: python lists are very inefficient and should be replaced.
         if dist < dist1:
             set1.append(gaia[i][:])
 
@@ -39,59 +38,32 @@ def to_sets(target, gaia, dist1=40, dist2=80):
     return set1, set2
 
 
-"""@cuda.jit
-def to_sets_gpu(target, gaia, set1, set2):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    dist1 = 40
-    dist2 = 80
-    #z = np.zeros(shape=target[:3].shape)
-    #z = cuda.local.array(shape=(3,), dtype=float64)
-    set1_idx = 0
-    set2_idx = 0
-    for i in range(start, gaia.shape[0], stride):
-        s = 0
-        for j in range(3):
-            z = (target[j] - gaia[i][j]) ** 2
-            s = s + z
-        dist = math.sqrt(s)
-
-        set1[set1_idx] = s
-        set1_idx = set1_idx + 1
-        if set1_idx == 3:
-            break
-
-        if dist < dist1:
-            for k in range(set1.shape[1]):
-                set1[set1_idx][k] = gaia[i][k]
-            set1_idx = set1_idx + 1
-            #set1.append(gaia[i][:])
-
-        if dist < dist2:
-            for k in range(set2.shape[1]):
-                set2[set2_idx][k] = gaia[i][k]
-            set2_idx = set2_idx + 1
-        #set2.append(gaia[i][:])
-
-
-    # Loop over all close neighbours
-    for i in range(start, set1.shape[0], stride):"""
-
-
 @cuda.jit
 def to_sets_gpu(target, gaia, set1, set2):
+    """
+    Create two sets of neigbours of the target star within given range (by default 40pc and 80pc).
+
+    :param target: Phase space coordinates of the target star
+    :param gaia: List of phase space coordinates for all stars in Gaia dataset
+    :param dist1: First neighbourhood radius.
+    :param dist2: Second neighbourhood radius.
+    :param set1: Numpy array to store list of neighbours within dist1.
+    :param set2: Numpy array to store list of neighbours within dist2.
+    """
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
     dist1 = 40
     dist2 = 80
 
     for i in range(start, gaia.shape[0], stride):
+        # Calculate distance from target star to its neighbour
         s = 0
         for j in range(3):
             z = (target[j] - gaia[i][j]) ** 2
             s = s + z
         dist = math.sqrt(s)
 
+        # Check if value fits into a predefined range and if so add value to an appropriate array.
         if dist < dist1:
             for k in range(set1.shape[1]):
                 set1[i][k] = gaia[i][k]
@@ -101,7 +73,7 @@ def to_sets_gpu(target, gaia, set1, set2):
 
 
 @njit(parallel=True)
-def calc_mah(set1_star, set2, set2_inv):
+def calc_mah_cpu(set1_star, set2, set2_inv):
     """
     Calculate mahalanobis distance to all neighbours of the target star and select 20th closest.
 
@@ -132,6 +104,14 @@ def calc_mah(set1_star, set2, set2_inv):
 
 @cuda.jit
 def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
+    """
+    Calculate mahalanobis distance to all neighbours of the target star using 6D coordinates and select 20th closest.
+
+    :param set1: Entire first set of neighbours.
+    :param set2: Entire second set of neighbours.
+    :param set2_inv: Inverse second set of neighbours.
+    :param dists: Array for calculated mahalanobis distances.
+    """
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
 
@@ -145,6 +125,7 @@ def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
         delta = cuda.local.array(shape=(6,), dtype=float64)
         z = cuda.local.array(shape=(6,), dtype=float64)
         for j in range(set2.shape[0]):
+            # Calculate mahalanobis distance
             # Subtract arrays
             for k in range(set2.shape[1]):
                 delta[k] = set1[i][k] - set2[j][k]
@@ -152,30 +133,30 @@ def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
             # Compute first dot product
             for k in range(delta.shape[0]):
                 s = 0
-                for l in range(set2_inv.shape[0]):
-                    a = delta[l] * set2_inv[l][k]
+                for g in range(set2_inv.shape[0]):
+                    a = delta[g] * set2_inv[g][k]
                     s = s + a
                 z[k] = s
 
             # Compute second dot product
-            u = 0
-            for l in range(z.shape[0]):
-                a = z[l] * delta[l]
-                u = u + a
+            s = 0
+            for k in range(z.shape[0]):
+                a = z[k] * delta[k]
+                s = s + a
 
             # Fill an array with the first 20 values and then continue comparing current value to the maximum value in
             # the array. If current value is lower then add it to array in place of the maximum value
             if j < 20:
-                dist[j] = u
+                dist[j] = s
             elif j == 20:
-                for g in range(dist.shape[0]):
-                    if dist[g] > max_val:
-                        max_val = dist[g]
+                for k in range(dist.shape[0]):
+                    if dist[k] > max_val:
+                        max_val = dist[k]
 
-            if max_val > u:
-                for g in range(dist.shape[0]):
-                    if dist[g] == max_val:
-                        dist[g] = u
+            if max_val > s:
+                for k in range(dist.shape[0]):
+                    if dist[k] == max_val:
+                        dist[k] = s
                         max_val = 0
                         for g in range(dist.shape[0]):
                             if dist[g] > max_val:
@@ -188,6 +169,14 @@ def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
 
 @cuda.jit
 def calc_mah_gpu_5d(set1, set2, set2_inv, dists):
+    """
+    Calculate mahalanobis distance to all neighbours of the target star using 5D coordinates and select 20th closest.
+
+    :param set1: Entire first set of neighbours.
+    :param set2: Entire second set of neighbours.
+    :param set2_inv: Inverse second set of neighbours.
+    :param dists: Array for calculated mahalanobis distances.
+    """
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
 
@@ -201,6 +190,7 @@ def calc_mah_gpu_5d(set1, set2, set2_inv, dists):
         delta = cuda.local.array(shape=(5,), dtype=float64)
         z = cuda.local.array(shape=(5,), dtype=float64)
         for j in range(set2.shape[0]):
+            # Calculate mahalanobis distance
             # Subtract arrays
             for k in range(set2.shape[1]):
                 delta[k] = set1[i][k] - set2[j][k]
@@ -208,30 +198,30 @@ def calc_mah_gpu_5d(set1, set2, set2_inv, dists):
             # Compute first dot product
             for k in range(delta.shape[0]):
                 s = 0
-                for l in range(set2_inv.shape[0]):
-                    a = delta[l] * set2_inv[l][k]
+                for g in range(set2_inv.shape[0]):
+                    a = delta[g] * set2_inv[g][k]
                     s = s + a
                 z[k] = s
 
             # Compute second dot product
-            u = 0
-            for l in range(z.shape[0]):
-                a = z[l] * delta[l]
-                u = u + a
+            s = 0
+            for k in range(z.shape[0]):
+                a = z[k] * delta[k]
+                s = s + a
 
             # Fill an array with the first 20 values and then continue comparing current value to the maximum value in
             # the array. If current value is lower then add it to array in place of the maximum value
             if j < 20:
-                dist[j] = u
+                dist[j] = s
             elif j == 20:
-                for g in range(dist.shape[0]):
-                    if dist[g] > max_val:
-                        max_val = dist[g]
+                for k in range(dist.shape[0]):
+                    if dist[k] > max_val:
+                        max_val = dist[k]
 
-            if max_val > u:
-                for g in range(dist.shape[0]):
-                    if dist[g] == max_val:
-                        dist[g] = u
+            if max_val > s:
+                for k in range(dist.shape[0]):
+                    if dist[k] == max_val:
+                        dist[k] = s
                         max_val = 0
                         for g in range(dist.shape[0]):
                             if dist[g] > max_val:
@@ -249,126 +239,80 @@ def calc_dense(mah_dist_arr, dims=6, nth_star=20):
 
     :param mah_dist_arr: List of mahalanobis distances from target star to all neighbours.
     :param dims: Number of dimensions (phase space density coordinates used to calculate mahalanobis distance).
+    :param nth_star: Nth closest neighbour distance.
 
     :return: List of phase space densities of all neighbours.
     """
     density = nth_star / mah_dist_arr ** dims
-    norm_density = density/np.median(density)
+    norm_density = density / np.median(density)
     return norm_density
 
 
-def get_densities(n_stars, labels,  gaia):
+def get_densities(labels, gaia, start=0, stop=1000, step=1, run_on_gpu=False):
     """
-    Calculate phase space density for a list of stars supplied in first argument
+    Calculate phase space density for a list of stars supplied in first argument.
 
-    :param hosts: List of exoplanet host stars
-    :param gaia: List of cartesian coordinates for all gaia stars
+    :param labels: List of star labels (source_id) from Gaia dataset.
+    :param gaia: List of cartesian coordinates for all gaia stars.
+    :param start: Start from given integer.
+    :param stop: Stop at given integer.
+    :param step: Increment value.
+    :param run_on_gpu: Set True to run pipeline on GPU.
 
-    :return: List of phase space densities where first entry is target star and remaining values are its neighbours
+    :return: List of target stars with their corresponding densities and densities of their neighbours.
+    Second value returns list of dropped stars that have less than 400 neighbours within given distance.
     """
 
+    dropped = []
     densities = []
-    for i in range(n_stars):
-        """target = gaia[i]
+    for i in range(start, stop, step):
         # Generate sets of star neighbours
-        set1, set2 = to_sets(target, gaia)
-        set1 = np.array(set1)
-        set2 = np.array(set2)
-        #target = gaia[i]"""
+        if run_on_gpu:
+            target = np.ascontiguousarray(gaia[i])
+            set1 = np.zeros(shape=gaia.shape)
+            set2 = np.zeros(shape=gaia.shape)
+            to_sets_gpu[16, 32](target, gaia, set1, set2)
+            set1 = set1[~np.all(set1 == 0, axis=1)]
+            set2 = set2[~np.all(set2 == 0, axis=1)]
+        else:
+            target = gaia[i]
+            set1, set2 = to_sets_cpu(target, gaia)
+            set1 = np.array(set1)
+            set2 = np.array(set2)
 
-        target = np.ascontiguousarray(gaia[i])
-        set1 = np.zeros(shape=gaia.shape)
-        set2 = np.zeros(shape=gaia.shape)
-        to_sets_gpu[160, 256](target, gaia, set1, set2)
-        set1 = set1[~np.all(set1 == 0, axis=1)]
-        set2 = set2[~np.all(set2 == 0, axis=1)]
+        # Drop stars with less than 400 neighbours
+        if set1.shape[0] < 400:
+            dropped.append([labels[i], set1.shape[0], set2.shape[0]])
+            continue
 
         # Get id of the target star and remove it from set2
         host_idx = np.where(set1 == target)[0][0]
-
         set2 = np.delete(set2, np.where(set2 == target)[0][0], 0)
 
         # Create inverted covariance matrix of set2
         set2_inv = np.atleast_2d(np.linalg.inv(np.cov(set2.T)))
 
         # Calculate mahalanobis distance for all neighbours from set1
-        """mah_dist_arr = np.zeros(set1.shape[0], dtype="float64")
-        for j in range(set1.shape[0]):
-            mah_dist_arr[j] = (calc_mah(set1[j], set2, set2_inv))"""
-
-        if set2.shape[1] == 6:
-            mah_dist_arr = np.zeros(shape=(set1.shape[0],))
-            calc_mah_gpu_6d[46, 64](set1, set2, set2_inv, mah_dist_arr)
+        if run_on_gpu:
+            if set2.shape[1] == 6:
+                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
+                calc_mah_gpu_6d[80, 96](set1, set2, set2_inv, mah_dist_arr)
+            else:
+                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
+                calc_mah_gpu_5d[80, 96](set1, set2, set2_inv, mah_dist_arr)
         else:
-            mah_dist_arr = np.zeros(shape=(set1.shape[0],))
-            calc_mah_gpu_5d[46, 64](set1, set2, set2_inv, mah_dist_arr)
+            mah_dist_arr = np.zeros(set1.shape[0], dtype="float64")
+            for j in range(set1.shape[0]):
+                mah_dist_arr[j] = (calc_mah_cpu(set1[j], set2, set2_inv))
 
         # Calculate densities for each neighbour from set1
         norm_density = calc_dense(mah_dist_arr, gaia.shape[1])
 
         # Extract host from the list and remove it from the list for further use
         host = norm_density[host_idx]
-
         norm_density = np.delete(norm_density, host_idx, 0)
 
         # Save both target host density and its neighbours densities to an array
-        densities.append([labels[i], host, norm_density])
+        densities.append([labels[i], host, set1.shape[0], set2.shape[0], norm_density])
 
-    return densities
-
-
-def get_random_densities(hosts, gaia, rand_stars, iters):
-    """
-    Calculate phase space density for a list of stars supplied in first argument
-
-    :param hosts: List of exoplanet host stars
-    :param gaia: List of cartesian coordinates for all gaia stars
-
-    :return: List of phase space densities where first entry is target star and remaining values are its neighbours
-    """
-    rand_stars = rand_stars + 1
-    densities = []
-    for i in range(hosts.shape[0]):
-        target = gaia[i]
-
-        # Generate sets of star neighbours
-        set1, set2 = to_sets(target, gaia)
-        set1 = np.array(set1)
-        set2 = np.array(set2)
-
-        # Get id of the target star and remove it from set2
-        #host_idx = np.where(set1 == target)[0][0]
-        #set1 = np.delete(set1, np.where(set1 == target)[0][0], 0)
-        set2 = np.delete(set2, np.where(set2 == target)[0][0], 0)
-
-        for j in range(iters):
-            # Randomize set1 and put back target star on top of the set
-            set1 = np.delete(set1, np.where(set1 == target)[0][0], 0)
-            set1 = np.random.permutation(set1)
-            set1 = np.vstack((target, set1))
-
-            # Create inverted covariance matrix of set2
-            set2_inv = np.atleast_2d(np.linalg.inv(np.cov(set2.T)))
-
-            # Calculate mahalanobis distance for all neighbours from set1
-
-            if set1.shape[0] <= rand_stars:
-                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
-                calc_mah_gpu[32, 64](set1, set2, set2_inv, mah_dist_arr)
-            else:
-                mah_dist_arr = np.zeros(shape=(rand_stars,))
-                calc_mah_gpu[32, 64](set1[:rand_stars], set2, set2_inv, mah_dist_arr)
-
-            mah_dist_arr = np.sqrt(mah_dist_arr)
-
-            # Calculate densities for each neighbour from set1
-            norm_density = calc_dense(mah_dist_arr, gaia.shape[1])
-
-            # Extract host from the list and remove it from the list for further use
-            host = norm_density[0]
-            norm_density = np.delete(norm_density, 0, 0)
-
-            # Save both target host density and its neighbours densities to an array
-            densities.append([hosts[i], host, norm_density])
-
-    return densities
+    return densities, dropped

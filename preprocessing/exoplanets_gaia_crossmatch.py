@@ -4,16 +4,16 @@ from os import path
 import os
 from .read_winter import load_winter
 
-crossmatch_dir = "data/crossmatch"
 
-
-def gaia_exoplanets_cross(gaia_filename, save_gaia_id=False, return_data=False, save_spherical=True):
+def gaia_exoplanets_cross(gaia_filename, crossmatch_dir, save_gaia_id=False, return_data=False, save_spherical=True):
     """
     Cross match Gaia dataset with NASA exoplanet dataset.
 
     :param gaia_filename: Name of the file to read Gaia information from
+    :param crossmatch_dir:
+    :param save_gaia_id:
     :param return_data: Return crossmatched gaia data for further use
-    :param save_to_file: Save crossmatched data to a CSV format
+    :param save_spherical: Save crossmatched data to a CSV format
     :return: Cross matched dataset
     """
 
@@ -21,7 +21,7 @@ def gaia_exoplanets_cross(gaia_filename, save_gaia_id=False, return_data=False, 
     datasets_dir = "data/initial_datasets"
 
     # Read Exoplanets data
-    exoplanets = pd.read_csv(path.join(datasets_dir, "exoplanets.csv"), skiprows=24,
+    exoplanets = pd.read_csv(path.join(datasets_dir, "exoplanets.csv"), skiprows=28,
                              usecols=["pl_name", "hostname", "gaia_id", "pl_orbper", "pl_orbsmax", "pl_bmasse"])
     # Process Exoplanets data
     exoplanets.dropna(subset=["gaia_id"], inplace=True)
@@ -64,13 +64,13 @@ def gaia_exoplanets_cross(gaia_filename, save_gaia_id=False, return_data=False, 
     if save_spherical:
         gaia.to_csv(path.join(crossmatch_dir, f"{gaia_filename.split('.')[0]}_exoplanet_cross_spherical.csv"),
                     index=False)
-        exoplanets.to_csv(path.join(crossmatch_dir, "exoplanet_hosts.csv"), index=False)
+        exoplanets.to_csv(path.join(crossmatch_dir, f"{gaia_filename.split('.')[0]}_exoplanet_hosts.csv"), index=False)
 
     if return_data:
         return gaia
 
 
-def transform_to_cart(gaia, table_name, setting="6d", predicted_radial_velocity=None):
+def transform_to_cart(gaia, table_name, crossmatch_dir, setting="6d", predicted_radial_velocity=None):
     """
 
     :param gaia: Gaia dataset
@@ -95,10 +95,15 @@ def transform_to_cart(gaia, table_name, setting="6d", predicted_radial_velocity=
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
                                                        gaia["distance_pc"], gaia["ra"], gaia["dec"])
         gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
-    elif setting == "5d_drop_vz":
+    elif setting == "5d_drop_rv":
         # 5D coords [average]
         gaia[["vx", "vy"]]= gaia[["pmra", "pmdec"]]
         gaia.drop(gaia.columns[:-5], axis=1, inplace=True)
+    elif setting == "5d_drop_vz":
+        gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
+                                                       gaia["distance_pc"], gaia["ra"], gaia["dec"])
+        gaia.drop(gaia.columns[:-6], axis=1, inplace=True)
+        gaia.drop(["vz"], axis=1, inplace=True)
     elif setting == "5d_drop_vy":
         # 5D coords [average]
         gaia["vx"], gaia["vy"], gaia["vz"] = vsph2cart(gaia["dr2_radial_velocity"], gaia["pmra"], gaia["pmdec"],
