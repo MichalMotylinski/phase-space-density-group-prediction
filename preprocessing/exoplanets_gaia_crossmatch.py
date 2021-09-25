@@ -125,7 +125,7 @@ def transform_to_cart(gaia, table_name, crossmatch_dir, setting="6d", predicted_
 
 # Function to convert positions from spherical to cartesian coordinates
 def sph2cart(r, ra, dec):
-    x = r * np.cos(ra) * np.cos(dec)  # Why is this not sin(ra)*sin(dec)?
+    x = r * np.cos(ra) * np.cos(dec)
     y = r * np.sin(ra) * np.cos(dec)
     z = r * np.sin(dec)
 
@@ -157,12 +157,8 @@ def vcart2vsph(vx, vy, vz, x, y, z):
 
 # Function to convert velocities from spherical to cartesian coordinates
 def vsph2cart(rdot, radot, decdot, r, ra, dec):
-    xdot = np.cos(ra) * np.cos(dec) * rdot - \
-           r * np.sin(ra) * np.cos(dec) * radot \
-           - r * np.cos(ra) * np.sin(dec) * decdot
-    ydot = np.sin(ra) * np.cos(dec) * rdot + \
-           r * np.cos(ra) * np.cos(dec) * radot - \
-           r * np.sin(ra) * np.sin(dec) * decdot
+    xdot = np.cos(ra) * np.cos(dec) * rdot - r * np.sin(ra) * np.cos(dec) * radot - r * np.cos(ra) * np.sin(dec) * decdot
+    ydot = np.sin(ra) * np.cos(dec) * rdot + r * np.cos(ra) * np.cos(dec) * radot - r * np.sin(ra) * np.sin(dec) * decdot
     zdot = np.sin(dec) * rdot + r * np.cos(dec) * decdot
 
     return xdot, ydot, zdot
