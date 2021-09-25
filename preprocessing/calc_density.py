@@ -4,6 +4,8 @@ import numpy as np
 import time
 import math
 
+N_PARAMS = 6
+
 
 @njit(parallel=False)
 def to_sets_cpu(target, gaia, dist1=40, dist2=80):
@@ -103,7 +105,7 @@ def calc_mah_cpu(set1_star, set2, set2_inv):
 
 
 @cuda.jit
-def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
+def calc_mah_gpu(set1, set2, set2_inv, dists):
     """
     Calculate mahalanobis distance to all neighbours of the target star using 6D coordinates and select 20th closest.
 
@@ -122,73 +124,9 @@ def calc_mah_gpu_6d(set1, set2, set2_inv, dists):
             dist[k] = 99999.
         max_val = 0
 
-        delta = cuda.local.array(shape=(6,), dtype=float64)
-        z = cuda.local.array(shape=(6,), dtype=float64)
-        for j in range(set2.shape[0]):
-            # Calculate mahalanobis distance
-            # Subtract arrays
-            for k in range(set2.shape[1]):
-                delta[k] = set1[i][k] - set2[j][k]
+        delta = cuda.local.array(shape=(N_PARAMS,), dtype=float64)
+        z = cuda.local.array(shape=(N_PARAMS,), dtype=float64)
 
-            # Compute first dot product
-            for k in range(delta.shape[0]):
-                s = 0
-                for g in range(set2_inv.shape[0]):
-                    a = delta[g] * set2_inv[g][k]
-                    s = s + a
-                z[k] = s
-
-            # Compute second dot product
-            s = 0
-            for k in range(z.shape[0]):
-                a = z[k] * delta[k]
-                s = s + a
-
-            # Fill an array with the first 20 values and then continue comparing current value to the maximum value in
-            # the array. If current value is lower then add it to array in place of the maximum value
-            if j < 20:
-                dist[j] = s
-            elif j == 20:
-                for k in range(dist.shape[0]):
-                    if dist[k] > max_val:
-                        max_val = dist[k]
-
-            if max_val > s:
-                for k in range(dist.shape[0]):
-                    if dist[k] == max_val:
-                        dist[k] = s
-                        max_val = 0
-                        for g in range(dist.shape[0]):
-                            if dist[g] > max_val:
-                                max_val = dist[g]
-                        break
-
-        # Save maximum value (20th nearest neighbour) to the list
-        dists[i] = math.sqrt(max_val)
-
-
-@cuda.jit
-def calc_mah_gpu_5d(set1, set2, set2_inv, dists):
-    """
-    Calculate mahalanobis distance to all neighbours of the target star using 5D coordinates and select 20th closest.
-
-    :param set1: Entire first set of neighbours.
-    :param set2: Entire second set of neighbours.
-    :param set2_inv: Inverse second set of neighbours.
-    :param dists: Array for calculated mahalanobis distances.
-    """
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
-
-    # Loop over all close neighbours
-    for i in range(start, set1.shape[0], stride):
-        dist = cuda.local.array(shape=(20,), dtype=float64)
-        for k in range(dist.shape[0]):
-            dist[k] = 99999.
-        max_val = 0
-
-        delta = cuda.local.array(shape=(5,), dtype=float64)
-        z = cuda.local.array(shape=(5,), dtype=float64)
         for j in range(set2.shape[0]):
             # Calculate mahalanobis distance
             # Subtract arrays
@@ -294,12 +232,9 @@ def get_densities(labels, gaia, start=0, stop=1000, step=1, run_on_gpu=False):
 
         # Calculate mahalanobis distance for all neighbours from set1
         if run_on_gpu:
-            if set2.shape[1] == 6:
-                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
-                calc_mah_gpu_6d[80, 96](set1, set2, set2_inv, mah_dist_arr)
-            else:
-                mah_dist_arr = np.zeros(shape=(set1.shape[0],))
-                calc_mah_gpu_5d[80, 96](set1, set2, set2_inv, mah_dist_arr)
+            N_PARAMS = set1.shape[1]
+            mah_dist_arr = np.zeros(shape=(set1.shape[0],))
+            calc_mah_gpu[80, 96](set1, set2, set2_inv, mah_dist_arr)
         else:
             mah_dist_arr = np.zeros(set1.shape[0], dtype="float64")
             for j in range(set1.shape[0]):
