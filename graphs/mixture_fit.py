@@ -58,7 +58,7 @@ def best_fit_mixture(model, data, host, phigh, fig_dir=None, show_graph=False, s
     plt.close()
 
 
-def combined_fit_mixture(model, data, host, fig_dir=None, show_graph=False, save_graph=False):
+def combined_fit_mixture(model, data, host, n_gaussians, fig_dir=None, show_graph=False, save_graph=False):
     """
     Draw best fit mixture.
 
@@ -72,7 +72,7 @@ def combined_fit_mixture(model, data, host, fig_dir=None, show_graph=False, save
     fig.subplots_adjust(left=0.12, right=0.97, bottom=0.21, top=0.9, wspace=0.5)
     ax = fig.add_subplot(131)
     colors = ["r", "b", "g", "k", "y"]
-    for i in range(5):
+    for i in range(n_gaussians):
         x = np.linspace(math.floor(data[i].min()), math.ceil(data[i].max()), data[i].shape[0])
         logprob = model[i].score_samples(x.reshape(-1, 1))
 
