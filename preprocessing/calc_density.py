@@ -1,21 +1,20 @@
-from numba import njit, prange
-from numba import cuda, float64
-import numpy as np
-import time
 import math
+from numba import njit, prange, cuda, float64
+import numpy as np
 
+# Global variables for cuda functions input
 N_PARAMS = 6
+N_DIST_CLOSE = 40
+N_DIST_FAR = 80
 
 
 @njit(parallel=False)
-def to_sets_cpu(target, gaia, dist1=40, dist2=80):
+def to_sets_cpu(target, gaia):
     """
     Create two sets of neigbours of the target star within given range (by default 40pc and 80pc).
 
     :param target: Phase space coordinates of the target star
     :param gaia: List of phase space coordinates for all stars in Gaia dataset
-    :param dist1: First neighbourhood radius.
-    :param dist2: Second neighbourhood radius.
 
     :return: Return 2 sets of neighbours according to the supplied dist1 and dist2 params
     """
@@ -31,10 +30,10 @@ def to_sets_cpu(target, gaia, dist1=40, dist2=80):
         dist = np.sqrt(np.sum(z ** 2, 0))
 
         # Check if value fits into a predefined range and if so add value to an appropriate array.
-        if dist < dist1:
+        if dist < N_DIST_CLOSE:
             set1.append(gaia[i][:])
 
-        if dist < dist2:
+        if dist < N_DIST_FAR:
             set2.append(gaia[i][:])
 
     return set1, set2
@@ -47,15 +46,12 @@ def to_sets_gpu(target, gaia, set1, set2):
 
     :param target: Phase space coordinates of the target star
     :param gaia: List of phase space coordinates for all stars in Gaia dataset
-    :param dist1: First neighbourhood radius.
-    :param dist2: Second neighbourhood radius.
     :param set1: Numpy array to store list of neighbours within dist1.
     :param set2: Numpy array to store list of neighbours within dist2.
     """
+
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
-    dist1 = 40
-    dist2 = 80
 
     for i in range(start, gaia.shape[0], stride):
         # Calculate distance from target star to its neighbour
@@ -66,10 +62,10 @@ def to_sets_gpu(target, gaia, set1, set2):
         dist = math.sqrt(s)
 
         # Check if value fits into a predefined range and if so add value to an appropriate array.
-        if dist < dist1:
+        if dist < N_DIST_CLOSE:
             for k in range(set1.shape[1]):
                 set1[i][k] = gaia[i][k]
-        if dist < dist2:
+        if dist < N_DIST_FAR:
             for k in range(set2.shape[1]):
                 set2[i][k] = gaia[i][k]
 
@@ -114,6 +110,7 @@ def calc_mah_gpu(set1, set2, set2_inv, dists):
     :param set2_inv: Inverse second set of neighbours.
     :param dists: Array for calculated mahalanobis distances.
     """
+
     start = cuda.grid(1)
     stride = cuda.gridsize(1)
 
@@ -181,6 +178,7 @@ def calc_dense(mah_dist_arr, dims=6, nth_star=20):
 
     :return: List of phase space densities of all neighbours.
     """
+
     density = nth_star / mah_dist_arr ** dims
     norm_density = density / np.median(density)
     return norm_density
@@ -200,6 +198,8 @@ def get_densities(labels, gaia, start=0, stop=1000, step=1, run_on_gpu=False):
     :return: List of target stars with their corresponding densities and densities of their neighbours.
     Second value returns list of dropped stars that have less than 400 neighbours within given distance.
     """
+
+    global N_PARAMS
 
     dropped = []
     densities = []
