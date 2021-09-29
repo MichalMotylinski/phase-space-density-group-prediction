@@ -1,5 +1,5 @@
-from sklearn.mixture import GaussianMixture as gm
 import numpy as np
+from sklearn.mixture import GaussianMixture as gm
 
 
 def gaussian_mixture(x, y, components=2, max_iter=1000, scores_only=True):
@@ -11,9 +11,11 @@ def gaussian_mixture(x, y, components=2, max_iter=1000, scores_only=True):
     :param components: Number of components to apply to Gaussian Mixture model
     :param max_iter: Number of step used by the best fit of expectation-maximization algorithm to reach the convergence.
     :param scores_only: Return model and scores or scores only
+
     :return: scores: List of scores as well as Gaussian Mixture attributes,
      model: Gaussian Mixture model object
     """
+
     model = gm(n_components=components, max_iter=max_iter)
     model = model.fit(x)
 

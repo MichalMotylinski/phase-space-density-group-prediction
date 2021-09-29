@@ -1,8 +1,6 @@
 import numpy as np
-import pandas as pd
 from os import path
-import os
-from .read_winter import load_winter
+import pandas as pd
 
 
 def gaia_exoplanets_cross(gaia_filename, crossmatch_dir, save_gaia_id=False, return_data=False, save_spherical=True):
@@ -10,10 +8,11 @@ def gaia_exoplanets_cross(gaia_filename, crossmatch_dir, save_gaia_id=False, ret
     Cross match Gaia dataset with NASA exoplanet dataset.
 
     :param gaia_filename: Name of the file to read Gaia information from
-    :param crossmatch_dir:
-    :param save_gaia_id:
+    :param crossmatch_dir: Path to crossmatch directory
+    :param save_gaia_id: Bool to save source_id values in a separate file
     :param return_data: Return crossmatched gaia data for further use
     :param save_spherical: Save crossmatched data to a CSV format
+
     :return: Cross matched dataset
     """
 

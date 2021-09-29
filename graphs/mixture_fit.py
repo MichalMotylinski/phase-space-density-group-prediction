@@ -1,21 +1,24 @@
+import math
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import stats
-import math
 import os
-import shutil
 
 
 def best_fit_mixture(model, data, host, phigh, fig_dir=None, show_graph=False, save_graph=False):
     """
-    Draw best fit mixture.
+    Draw combined best fit mixture.
 
     :param model: Gaussian Mixture model object
     :param data: Calculated densities
     :param host: Target star
-    :param fig_dir:
-    :return: Plot a best fit mixture graph
+    :param phigh: Value of Phigh
+    :param fig_dir: Path to graph directory
+    :param show_graph: Bool to output the graphs on screen
+    :param save_graph: Bool to save graphs in a folder
+
+    :return: Plot a best fit mixture graph.
     """
+
     fig = plt.figure(figsize=(50, 5), facecolor="w")
     fig.subplots_adjust(left=0.12, right=0.97, bottom=0.21, top=0.9, wspace=0.5)
     ax = fig.add_subplot(131)
@@ -30,16 +33,16 @@ def best_fit_mixture(model, data, host, phigh, fig_dir=None, show_graph=False, s
 
     plt.axvline(x=host[1], color="r", label=f"{host[0]}: {host[1][0]}", ymax=0.7)
 
-    ax.hist(data, 30, density=True, histtype='stepfilled', alpha=0.5)
+    ax.hist(data, 30, density=True, histtype="stepfilled", alpha=0.5)
 
     # Add combined kde line
-    ax.plot(x, pdf, '-k')
+    ax.plot(x, pdf, "-k")
     # Add individual lines for low and high density
-    ax.plot(x, pdf_individual, '--k')
+    ax.plot(x, pdf_individual, "--k")
 
     plt.title("Best-fit Mixture")
-    ax.set_xlabel('Phase space density')
-    ax.set_ylabel('Probability density function')
+    ax.set_xlabel("Phase space density")
+    ax.set_ylabel("Probability density function")
     plt.xticks(np.arange(min(x), max(x) + 1, 1.0))
     plt.yticks(np.arange(0, max(pdf) + 0.2, 0.2))
 
@@ -51,7 +54,7 @@ def best_fit_mixture(model, data, host, phigh, fig_dir=None, show_graph=False, s
         i = 0
         while os.path.exists(f"figures/{fig_dir}/{host[0]}_{i}.png"):
             i += 1
-        plt.savefig(f"figures/{fig_dir}/{host[0]}_{i}", dpi=100, bbox_inches='tight', pad_inches=0.1)
+        plt.savefig(f"figures/{fig_dir}/{host[0]}_{i}", dpi=100, bbox_inches="tight", pad_inches=0.1)
     if show_graph:
         plt.show()
     fig.clf()
@@ -60,14 +63,19 @@ def best_fit_mixture(model, data, host, phigh, fig_dir=None, show_graph=False, s
 
 def combined_fit_mixture(model, data, host, n_gaussians, fig_dir=None, show_graph=False, save_graph=False):
     """
-    Draw best fit mixture.
+    Draw combined best fit mixture.
 
     :param model: Gaussian Mixture model object
     :param data: Calculated densities
     :param host: Target star
-    :param fig_dir:
-    :return: Plot a best fit mixture graph
+    :param n_gaussians: Number of gaussian mixture graphs to draw
+    :param fig_dir: Path to graph directory
+    :param show_graph: Bool to output the graphs on screen
+    :param save_graph: Bool to save graphs in a folder
+
+    :return: Plot a best fit mixture graph for multiple sets of data.
     """
+
     fig = plt.figure(figsize=(50, 5), facecolor="w")
     fig.subplots_adjust(left=0.12, right=0.97, bottom=0.21, top=0.9, wspace=0.5)
     ax = fig.add_subplot(131)
@@ -84,17 +92,17 @@ def combined_fit_mixture(model, data, host, n_gaussians, fig_dir=None, show_grap
         plt.axvline(x=host[i][1], color=colors[i], label=f"{host[i][0]}: {host[i][1]}")
 
         # Add combined kde line
-        ax.plot(x, pdf, f'-{colors[i]}')
+        ax.plot(x, pdf, f"-{colors[i]}")
         # Add individual lines for low and high density
-        ax.plot(x, pdf_individual, f'--{colors[i]}')
+        ax.plot(x, pdf_individual, f"--{colors[i]}")
 
     plt.title("Best-fit Mixture")
-    ax.set_xlabel('Phase space density')
-    ax.set_ylabel('Probability density function')
+    ax.set_xlabel("Phase space density")
+    ax.set_ylabel("Probability density function")
     plt.legend()
     fig.set_size_inches(50, 8)
     if save_graph:
-        plt.savefig(f"{fig_dir}/{host[0][0].rsplit('_', 1)[1]}", dpi=100, bbox_inches='tight', pad_inches=0.1)
+        plt.savefig(f"{fig_dir}/{host[0][0].rsplit('_', 1)[1]}", dpi=100, bbox_inches="tight", pad_inches=0.1)
     if show_graph:
         plt.show()
     fig.clf()
